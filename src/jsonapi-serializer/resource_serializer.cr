@@ -52,6 +52,19 @@ module JSONApiSerializer
       end
     {% end %}
 
+    private macro relationship_id(attr_call, rel_name, res_type)
+      {% attr_name = attr_call.name %}
+      @[Metadata(type: "relationship_id", name: "{{attr_name}}", rel_name: {{rel_name}}, res_type: {{res_type}})]
+      protected def _metadata_relationship_id_{{attr_name}}
+      end
+    end
+
+    private macro type(name)
+      def get_type : String
+        {{name}}
+      end
+    end
+
     def change_case(name : String) : String
       case @options.change_case
       when "camelcase"
@@ -63,28 +76,27 @@ module JSONApiSerializer
       end
     end
 
-    private macro type(name)
-      def get_type : String
-        {{name}}
-      end
-    end
-
     macro inherited
       macro finished
         {% verbatim do %}
           {% identifier_name = nil %}
           {% attr_names = [] of StringLiteral %}
           {% rel_names = [] of StringLiteral %}
+          {% rel_id_names = [] of StringLiteral %}
+          {% rel_id_metadata = {} of StringLiteral => Annotation %}
 
           {% for m in @type.methods %}
             {% meta_ann = m.annotation(Metadata) %}
             {% if meta_ann %}
-              {% if meta_ann[:type] =~ /identifier/ %}
+              {% if meta_ann[:type] == "identifier" %}
                 {% identifier_name = meta_ann[:name] %}
-              {% elsif meta_ann[:type] =~ /attribute/ %}
+              {% elsif meta_ann[:type] == "attribute" %}
                 {% attr_names << meta_ann[:name] %}
-              {% elsif meta_ann[:type] =~ /relationship/ %}
+              {% elsif meta_ann[:type] == "relationship" %}
                 {% rel_names << meta_ann[:name] %}
+              {% elsif meta_ann[:type] == "relationship_id" %}
+                {% rel_id_names << meta_ann[:name] %}
+                {% rel_id_metadata[meta_ann[:name]] = meta_ann %}
               {% end %}
             {% end %}
           {% end %}
@@ -195,6 +207,28 @@ module JSONApiSerializer
 
               relationships[change_case({{rel_name}})] = JSON::Any.new({
                 "data" => serialize_relationship_macro({{rel_name}})
+              })
+            {% end %}
+
+            {% for rel_id_name in rel_id_names %}
+              {% ann = rel_id_metadata[rel_id_name] %}
+              if entity.{{rel_id_name.id}}.nil?
+                rel_id_data = JSON::Any.new(nil)
+              elsif entity.{{rel_id_name.id}}.is_a?(Array)
+                rel_id_data = JSON::Any.new(entity.{{rel_id_name.id}}.as(Array).map do |id|
+                  JSON::Any.new({
+                    "id" => JSON::Any.new(id.to_s),
+                    "type" => JSON::Any.new({{ann[:res_type]}})
+                  })
+                end)
+              else
+                rel_id_data = JSON::Any.new({
+                  "id" => JSON::Any.new(entity.{{rel_id_name.id}}.to_s),
+                  "type" => JSON::Any.new({{ann[:res_type]}})
+                })
+              end
+              relationships[change_case({{ann[:rel_name]}})] = JSON::Any.new({
+                "data" => rel_id_data
               })
             {% end %}
 

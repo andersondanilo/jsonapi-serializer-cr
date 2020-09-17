@@ -6,6 +6,7 @@ class MyResource
   property description : String?
   property other_resource : OtherResource?
   property dependencies : Array(Dependency) = [] of Dependency
+  property brother_id : Int32?
 
   def initialize(@name)
   end
@@ -18,6 +19,7 @@ class MyResourceSerializer < JSONApiSerializer::ResourceSerializer(MyResource)
   attribute description
   relationship(other_resource) { @other_resource_serializer }
   relationship(dependencies) { DependencyResourceSerializer.new }
+  relationship_id brother_id, "brother", "brothers"
 
   def initialize(@other_resource_serializer : OtherResourceSerializer)
     super(nil)
@@ -62,6 +64,7 @@ describe JSONApiSerializer::ResourceSerializer do
     my_resource.id = 5
     my_resource.description = "teste"
     my_resource.other_resource = OtherResource.new(6, "Ok")
+    my_resource.brother_id = 7
     my_resource.dependencies = [
       Dependency.new("5", OtherResource.new(6, "Ok")),
       Dependency.new("6", OtherResource.new(7, "Ok")),
@@ -100,6 +103,12 @@ describe JSONApiSerializer::ResourceSerializer do
                 "type": "dependency"
               }
             ]
+          },
+          "brother": {
+            "data": {
+              "id": "7",
+              "type": "brothers"
+            }
           }
         }
       },
@@ -184,6 +193,12 @@ describe JSONApiSerializer::ResourceSerializer do
                 "type": "dependency"
               }
             ]
+          },
+          "brother": {
+            "data": {
+              "id": "7",
+              "type": "brothers"
+            }
           }
         }
       },
