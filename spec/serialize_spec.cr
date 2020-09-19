@@ -1,78 +1,80 @@
 require "./spec_helper"
 
-class MyResource
-  property id : Int32?
-  property name : String
-  property description : String?
-  property other_resource : OtherResource?
-  property dependencies : Array(Dependency) = [] of Dependency
-  property brother_id : Int32?
+module SerializeSpec
+  class MyResource
+    property id : Int32?
+    property name : String
+    property description : String?
+    property other_resource : OtherResource?
+    property dependencies : Array(Dependency) = [] of Dependency
+    property brother_id : Int32?
 
-  def initialize(@name)
+    def initialize(@name)
+    end
   end
-end
 
-class MyResourceSerializer < JSONApiSerializer::ResourceSerializer(MyResource)
-  identifier id
-  type "my-resource"
-  attribute name
-  attribute description
-  relationship(other_resource) { @other_resource_serializer }
-  relationship(dependencies) { DependencyResourceSerializer.new }
-  relationship_id brother_id, "brother", "brothers"
+  class MyResourceSerializer < JSONApiSerializer::ResourceSerializer(MyResource)
+    identifier id
+    type "my-resource"
+    attribute name
+    attribute description
+    relationship(other_resource) { @other_resource_serializer }
+    relationship(dependencies) { DependencyResourceSerializer.new }
+    relationship_id brother_id, "brother", "brothers"
 
-  def initialize(@other_resource_serializer : OtherResourceSerializer)
-    super(nil)
+    def initialize(@other_resource_serializer : OtherResourceSerializer)
+      super(nil)
+    end
   end
-end
 
-class OtherResource
-  property id : Int32
-  property name : String
+  class OtherResource
+    property id : Int32
+    property name : String
 
-  def initialize(@id, @name)
+    def initialize(@id, @name)
+    end
   end
-end
 
-class OtherResourceSerializer < JSONApiSerializer::ResourceSerializer(OtherResource)
-  identifier id
-  type "other-resource"
-  attribute name
-end
-
-class Dependency
-  property id : String
-  property dep_type : String = "Test"
-  property resource : OtherResource
-
-  def initialize(@id, @resource)
+  class OtherResourceSerializer < JSONApiSerializer::ResourceSerializer(OtherResource)
+    identifier id
+    type "other-resource"
+    attribute name
   end
-end
 
-class DependencyResourceSerializer < JSONApiSerializer::ResourceSerializer(Dependency)
-  identifier id
-  type "dependency"
+  class Dependency
+    property id : String
+    property dep_type : String = "Test"
+    property resource : OtherResource
 
-  attribute dep_type
+    def initialize(@id, @resource)
+    end
+  end
 
-  relationship(resource) { OtherResourceSerializer.new }
+  class DependencyResourceSerializer < JSONApiSerializer::ResourceSerializer(Dependency)
+    identifier id
+    type "dependency"
+
+    attribute dep_type
+
+    relationship(resource) { OtherResourceSerializer.new }
+  end
 end
 
 describe JSONApiSerializer::ResourceSerializer do
-  it "works" do
-    my_resource = MyResource.new "Teste"
+  it "serialize" do
+    my_resource = SerializeSpec::MyResource.new "Teste"
     my_resource.id = 5
     my_resource.description = "teste"
-    my_resource.other_resource = OtherResource.new(6, "Ok")
+    my_resource.other_resource = SerializeSpec::OtherResource.new(6, "Ok")
     my_resource.brother_id = 7
     my_resource.dependencies = [
-      Dependency.new("5", OtherResource.new(6, "Ok")),
-      Dependency.new("6", OtherResource.new(7, "Ok")),
+      SerializeSpec::Dependency.new("5", SerializeSpec::OtherResource.new(6, "Ok")),
+      SerializeSpec::Dependency.new("6", SerializeSpec::OtherResource.new(7, "Ok")),
     ]
 
-    other_serializer = OtherResourceSerializer.new
+    other_serializer = SerializeSpec::OtherResourceSerializer.new
 
-    serializer = MyResourceSerializer.new(other_serializer)
+    serializer = SerializeSpec::MyResourceSerializer.new(other_serializer)
 
     response = serializer.serialize(my_resource)
     response.should_not be_nil

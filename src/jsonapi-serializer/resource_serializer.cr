@@ -1,10 +1,12 @@
 require "./serializer"
 require "./serialize_options"
+require "./deserialize_exception"
 require "json"
 
 module JSONApiSerializer
   abstract class ResourceSerializer(T)
     alias JSONType = Nil | Bool | Int64 | Float64 | String | Array(JSONType) | Hash(String, JSONType)
+    alias DeserializeException = JSONApiSerializer::DeserializeException
 
     include Serializer(T)
 
@@ -321,7 +323,266 @@ module JSONApiSerializer
           end
 
           def deserialize(value : JSON::Any, base : T? = nil) : T?
+            begin
+              return deserialize!(value, base)
+            rescue DeserializeException
+              return nil
+            end
           end
+
+          def deserialize!(value : String, base : T? = nil) : T
+            value = JSON.parse(value)
+            return deserialize!(value, base)
+          end
+
+          def deserialize!(json : JSON::Any, base : T? = nil) : T
+            return deserialize_macro
+          end
+
+          macro deserialize_macro
+            {% verbatim do %}
+              {% identifier_name = nil %}
+              {% attr_names = [] of StringLiteral %}
+              {% rel_names = [] of StringLiteral %}
+              {% rel_id_names = [] of StringLiteral %}
+              {% rel_id_metadata = {} of StringLiteral => Annotation %}
+
+              {% for m in @type.methods %}
+                {% meta_ann = m.annotation(Metadata) %}
+                {% if meta_ann %}
+                  {% if meta_ann[:type] == "identifier" %}
+                    {% identifier_name = meta_ann[:name] %}
+                  {% elsif meta_ann[:type] == "attribute" %}
+                    {% attr_names << meta_ann[:name] %}
+                  {% elsif meta_ann[:type] == "relationship" %}
+                    {% rel_names << meta_ann[:name] %}
+                  {% elsif meta_ann[:type] == "relationship_id" %}
+                    {% rel_id_names << meta_ann[:name] %}
+                    {% rel_id_metadata[meta_ann[:name]] = meta_ann %}
+                  {% end %}
+                {% end %}
+              {% end %}
+
+              if json["data"]?.nil? || !json["data"].as_h?.is_a?(Hash)
+                error = DeserializeException.new("Invalid JSON \"data\" property")
+                error.error_type = DeserializeException::ErrorType::MALFORMED_JSON
+                error.path = "/data"
+
+                raise error
+              end
+
+              if json["data"]["attributes"]?.nil? || !json["data"]["attributes"].as_h?.is_a?(Hash)
+                error = DeserializeException.new("Invalid JSON \"data.attributes\" property")
+                error.error_type = DeserializeException::ErrorType::MALFORMED_JSON
+                error.path = "/data/attributes"
+
+                raise error
+              end
+
+              json_attrs = json["data"]["attributes"].as_h
+
+              {% all_properties = [] of StringLiteral %}
+
+              {% property_is_nilable = {} of StringLiteral => BoolLiteral %}
+
+              {% resource_class = @type.superclass.type_vars.first %}
+              {% for ivar in resource_class.instance_vars %}
+                {% property_is_nilable[ivar.name] = ivar.type.nilable? %}
+              {% end %}
+
+              {% for attr_name in attr_names %}
+                {% all_properties << attr_name %}
+                value = nil
+                value_is_undefined = nil
+                deserialize_attribute_name_macro({{attr_name}})
+                property_{{attr_name.id}}_path = "/data/attributes/#{change_case({{attr_name}})}"
+                property_{{attr_name.id}}_value = value
+                property_{{attr_name.id}}_is_undefined = value_is_undefined
+              {% end %}
+
+              {% for rel_id_name in rel_id_names %}
+                {% all_properties << rel_id_name %}
+                {% meta_ann = rel_id_metadata[rel_id_name] %}
+                value = nil
+                value_is_undefined = nil
+                deserialize_rel_id_name_macro({{rel_id_name}}, {{meta_ann[:rel_name]}})
+                property_{{rel_id_name.id}}_path = "/data/relationships/#{change_case({{meta_ann[:rel_name]}})}/data/id"
+                property_{{rel_id_name.id}}_value = value
+                property_{{rel_id_name.id}}_is_undefined = value_is_undefined
+              {% end %}
+
+              {% all_properties << identifier_name %}
+              property_{{identifier_name.id}}_path = "/data/id"
+              property_{{identifier_name.id}}_value = deserialize_id(json["data"])
+              property_{{identifier_name.id}}_is_undefined = !json["data"].as_h.has_key?("id")
+
+              instance = base
+              deserialize_make_instance
+
+
+              {% for property_name in all_properties %}
+                unless property_{{property_name.id}}_is_undefined
+                  {% if property_is_nilable[property_name] %}
+                    instance.{{property_name.id}} = property_{{property_name.id}}_value
+                  {% else %}
+                    if property_{{property_name.id}}_value.nil?
+                      error = DeserializeException.new("The attribute #{change_case({{property_name}})} is required")
+                      error.error_type = DeserializeException::ErrorType::REQUIRED_ATTRIBUTE
+                      error.path = property_{{property_name.id}}_path
+
+                      raise error
+                    else
+                      instance.{{property_name.id}} = property_{{property_name.id}}_value.not_nil!
+                    end
+                  {% end %}
+                end
+              {% end %}
+
+              return instance
+            {% end %}
+          end
+
+          macro deserialize_attribute_name_macro(name)
+            {% verbatim do %}
+              {% resource_class = @type.superclass.type_vars.first %}
+              {% attr_type = nil %}
+              {% for ivar in resource_class.instance_vars %}
+                {% if ivar.name == name.id %}
+                  {% attr_type = ivar.type %}
+                {% end %}
+              {% end %}
+
+              {% if attr_type.nil? %}
+                raise "attr {{name.id}} doest not exists on entity"
+              {% else %}
+                serializer = _metadata_attribute_{{name.id}}
+
+                if serializer.nil?
+                  serializer = JSONApiSerializer::DefaultSerializer({{attr_type}}).new
+                end
+
+                json_attr_name = change_case({{name}})
+
+                value_is_undefined = !json_attrs.has_key?(json_attr_name)
+                value = nil
+
+                unless json_attrs[json_attr_name]?.nil?
+                  value = serializer.deserialize(json_attrs[json_attr_name])
+                end
+              {% end %}
+            {% end %}
+          end
+
+          macro deserialize_rel_id_name_macro(prop_name, rel_name)
+            {% verbatim do %}
+              {% resource_class = @type.superclass.type_vars.first %}
+              {% attr_type = nil %}
+              {% for ivar in resource_class.instance_vars %}
+                {% if ivar.name == prop_name.id %}
+                  {% attr_type = ivar.type %}
+                {% end %}
+              {% end %}
+
+              {% if attr_type.nil? %}
+                raise "attr {{prop_name.id}} doest not exists on entity"
+              {% else %}
+                serializer = JSONApiSerializer::DefaultSerializer({{attr_type}}).new
+
+                json_rel_name = change_case({{rel_name}})
+
+                value_is_undefined = true
+                value = nil
+
+                if json["data"]? && json["data"].as_h? &&
+                    json["data"]["relationships"]? && json["data"]["relationships"].as_h?
+                    json["data"]["relationships"][json_rel_name]? && json["data"]["relationships"][json_rel_name].as_h?
+                    json["data"]["relationships"][json_rel_name]["data"]? && json["data"]["relationships"][json_rel_name]["data"].as_h?
+                  rel_data = json["data"]["relationships"][json_rel_name]["data"].as_h
+                  value_is_undefined = !rel_data.has_key?("id")
+                  unless rel_data["id"]?.nil?
+                    value = serializer.deserialize(rel_data["id"])
+                  end
+                end
+              {% end %}
+            {% end %}
+          end
+
+          def deserialize_id(data : JSON::Any)
+            return deserialize_id_macro
+          end
+
+          macro deserialize_id_macro
+            \{% resource_class = @type.superclass.type_vars.first %}
+            \{% attr_type = nil %}
+            \{% for ivar in resource_class.instance_vars %}
+              \{% if ivar.name == {{identifier_name}} %}
+                \{% attr_type = ivar.type %}
+              \{% end %}
+            \{% end %}
+
+            \{% if attr_type.nil? %}
+              raise "attr {{identifier_name.id}} doest not exists on entity"
+            \{% else %}
+              if data.as_h.has_key? "id"
+                value = data["id"]
+
+                serializer = _metadata_identifier_{{identifier_name.id}}
+
+                if serializer.nil?
+                  serializer = JSONApiSerializer::DefaultSerializer(\{{attr_type.id.gsub(/\| Nil/, "")}}).new
+                end
+
+                unless data["id"]?.nil?
+                  begin
+                    return serializer.deserialize(data["id"])
+                  rescue e : JSON::ParseException
+                    error = DeserializeException.new(e.message)
+                    error.error_type = DeserializeException::ErrorType::MALFORMED_JSON
+                    error.path = "/data/id"
+                    raise error
+                  end
+                end
+              end
+
+              return nil
+            \{% end %}
+          end
+
+          macro deserialize_make_instance
+            {% verbatim do %}
+              {% resource_class = @type.superclass.type_vars.first %}
+              {% init_method = nil %}
+
+              {% for method in resource_class.methods %}
+                {% if method.name == "initialize" %}
+                  {% init_method = method %}
+                {% end %}
+              {% end %}
+
+              {% if init_method %}
+                if instance.nil?
+                  {% init_args = [] of StringLiteral %}
+                  {% for arg in init_method.args %}
+                    {% for ivar in resource_class.instance_vars %}
+                      {% if ivar.name == arg.name %}
+                        {% unless ivar.type.nilable? || arg.default_value %}
+                          if property_{{arg.name}}_value.nil?
+                            error = DeserializeException.new("Attribute can't be null")
+                            error.error_type = DeserializeException::ErrorType::REQUIRED_ATTRIBUTE
+                            error.path = property_{{arg.name}}_path
+                            raise error
+                          end
+                          {% init_args << "#{arg.name}: property_#{arg.name}_value" %}
+                        {% end %}
+                      {% end %}
+                    {% end %}
+                  {% end %}
+                  instance = {{resource_class.name}}.new({{ init_args.join(", ").id }})
+                end
+              {% end %}
+            {% end %}
+          end
+
         {% end %}
       end
     end
