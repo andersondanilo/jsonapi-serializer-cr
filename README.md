@@ -1,6 +1,6 @@
 # jsonapi-serializer-cr
 
-JSON:API Serializer for Crystal Lang
+JSON:API Serializer for Crystal Lang, see JSON:API Specification at https://jsonapi.org/
 
 ## Installation
 
