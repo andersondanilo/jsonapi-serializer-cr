@@ -579,6 +579,8 @@ module JSONApiSerializer
                   {% end %}
                   instance = {{resource_class.name}}.new({{ init_args.join(", ").id }})
                 end
+              {% else %}
+                  instance = {{resource_class.name}}.new()
               {% end %}
             {% end %}
           end
