@@ -1,2 +1,2 @@
 require "spec"
-require "../src/jsonapi-serializer"
+require "../src/jsonapi-serializer-cr"
