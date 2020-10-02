@@ -122,6 +122,46 @@ module JSONApiSerializer
           {% end %}
         {% end %}
 
+        def serialize(entities : Enumerable(T)) : String
+          response = {"data" => [] of JSON::Any, "included" => [] of JSON::Any}
+          is_included = [] of String
+
+          all_included = Set(JSON::Any).new
+
+          entities.each do |entity|
+            data_item = {} of String => JSON::Any
+
+            serialized_id = serialize_id(entity)
+
+            unless serialized_id.raw.nil?
+              data_item["id"] = serialized_id
+            end
+
+            data_item["type"] = JSON::Any.new(get_type)
+            data_item["attributes"] = serialize_attributes(entity)
+
+            is_included << "#{get_type}/#{serialized_id}"
+
+            {% if rel_names.size > 0 %}
+              data_item["relationships"] = serialize_relationships(entity)
+
+              serialize_included(entity, is_included).each do |included|
+                all_included << included
+              end
+            {% end %}
+
+            response["data"].as(Array(JSON::Any)) << JSON::Any.new(data_item)
+          end
+
+          if all_included.size > 0
+            response["included"] = all_included.to_a
+          else
+            response.delete("included")
+          end
+
+          return response.to_json
+        end
+
         def serialize(entity : T?) : String?
           if entity.nil?
             return "null"

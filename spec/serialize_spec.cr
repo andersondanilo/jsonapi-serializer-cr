@@ -253,4 +253,168 @@ describe JSONApiSerializer::ResourceSerializer do
     }
     END
   end
+
+  it "serialize multiple entities" do
+    my_resource_1 = SerializeSpec::MyResource.new "Teste"
+    my_resource_1.id = 5
+    my_resource_1.description = "teste"
+    my_resource_1.other_resource = SerializeSpec::OtherResource.new(6, "Ok")
+    my_resource_1.brother_id = 7
+    my_resource_1.dependencies = [
+      SerializeSpec::Dependency.new("5", SerializeSpec::OtherResource.new(6, "Ok")),
+      SerializeSpec::Dependency.new("6", SerializeSpec::OtherResource.new(7, "Ok")),
+    ]
+
+    my_resource_2 = SerializeSpec::MyResource.new "Teste"
+    my_resource_2.id = 6
+    my_resource_2.description = "teste"
+    my_resource_2.other_resource = SerializeSpec::OtherResource.new(6, "Ok")
+    my_resource_2.brother_id = 7
+    my_resource_2.dependencies = [
+      SerializeSpec::Dependency.new("5", SerializeSpec::OtherResource.new(6, "Ok")),
+      SerializeSpec::Dependency.new("9", SerializeSpec::OtherResource.new(7, "Ok")),
+    ]
+
+    other_serializer = SerializeSpec::OtherResourceSerializer.new
+
+    serializer = SerializeSpec::MyResourceSerializer.new(other_serializer)
+
+    response = serializer.serialize([my_resource_1, my_resource_2])
+    response.should_not be_nil
+    JSON.parse(response.not_nil!).to_pretty_json.should eq <<-END
+    {
+      "data": [
+        {
+          "id": "5",
+          "type": "my-resource",
+          "attributes": {
+            "name": "Teste",
+            "description": "teste"
+          },
+          "relationships": {
+            "other_resource": {
+              "data": {
+                "id": "6",
+                "type": "other-resource"
+              }
+            },
+            "dependencies": {
+              "data": [
+                {
+                  "id": "5",
+                  "type": "dependency"
+                },
+                {
+                  "id": "6",
+                  "type": "dependency"
+                }
+              ]
+            },
+            "brother": {
+              "data": {
+                "id": "7",
+                "type": "brothers"
+              }
+            }
+          }
+        },
+        {
+          "id": "6",
+          "type": "my-resource",
+          "attributes": {
+            "name": "Teste",
+            "description": "teste"
+          },
+          "relationships": {
+            "other_resource": {
+              "data": {
+                "id": "6",
+                "type": "other-resource"
+              }
+            },
+            "dependencies": {
+              "data": [
+                {
+                  "id": "5",
+                  "type": "dependency"
+                },
+                {
+                  "id": "9",
+                  "type": "dependency"
+                }
+              ]
+            },
+            "brother": {
+              "data": {
+                "id": "7",
+                "type": "brothers"
+              }
+            }
+          }
+        }
+      ],
+      "included": [
+        {
+          "id": "6",
+          "type": "other-resource",
+          "attributes": {
+            "name": "Ok"
+          }
+        },
+        {
+          "id": "5",
+          "type": "dependency",
+          "attributes": {
+            "dep_type": "Test"
+          },
+          "relationships": {
+            "resource": {
+              "data": {
+                "id": "6",
+                "type": "other-resource"
+              }
+            }
+          }
+        },
+        {
+          "id": "6",
+          "type": "dependency",
+          "attributes": {
+            "dep_type": "Test"
+          },
+          "relationships": {
+            "resource": {
+              "data": {
+                "id": "7",
+                "type": "other-resource"
+              }
+            }
+          }
+        },
+        {
+          "id": "7",
+          "type": "other-resource",
+          "attributes": {
+            "name": "Ok"
+          }
+        },
+        {
+          "id": "9",
+          "type": "dependency",
+          "attributes": {
+            "dep_type": "Test"
+          },
+          "relationships": {
+            "resource": {
+              "data": {
+                "id": "7",
+                "type": "other-resource"
+              }
+            }
+          }
+        }
+      ]
+    }
+    END
+  end
 end
