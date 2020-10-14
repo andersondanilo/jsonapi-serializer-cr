@@ -233,6 +233,7 @@ module JSONApiSerializer
               raise "attr {{name.id}} doest not exists on entity"
             {% else %}
               serializer = _metadata_attribute_{{name.id}}
+              is_custom_serializer = !serializer.nil?
 
               if serializer.nil?
                 serializer = JSONApiSerializer::DefaultSerializer({{attr_type}}).new
@@ -240,7 +241,7 @@ module JSONApiSerializer
 
               raw_value = entity.{{name.id}}
 
-              if raw_value.is_a?(JSONType)
+              if raw_value.is_a?(JSONType) && !is_custom_serializer
                 value = JSON::Any.new(raw_value)
               else
                 str_value = serializer.serialize(raw_value)
